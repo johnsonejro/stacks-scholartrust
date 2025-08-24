@@ -82,6 +82,73 @@
     )
 )
 
+;; Create a new scholarship pool
+(define-public (create-scholarship-pool
+        (student principal)
+        (required-gpa uint)
+        (total-semesters uint)
+        (amount-per-semester uint)
+    )
+    (let (
+            (pool-id (+ (var-get pool-counter) u1))
+            (total-amount (* total-semesters amount-per-semester))
+        )
+        (asserts! (> amount-per-semester u0) ERR-INVALID-AMOUNT)
+        (asserts! (> total-semesters u0) ERR-INVALID-AMOUNT)
+        (asserts! (> required-gpa u0) ERR-INVALID-AMOUNT)
+        (asserts! (<= required-gpa u400) ERR-INVALID-AMOUNT)
+        ;; Max GPA 4.0
+
+        (try! (stx-transfer? total-amount tx-sender (as-contract tx-sender)))
+
+        (map-set scholarship-pools { pool-id: pool-id } {
+            donor: tx-sender,
+            total-amount: total-amount,
+            remaining-amount: total-amount,
+            student: student,
+            required-gpa: required-gpa,
+            total-semesters: total-semesters,
+            amount-per-semester: amount-per-semester,
+            semesters-released: u0,
+            created-at: stacks-block-height,
+            active: true,
+        })
+
+        (var-set pool-counter pool-id)
+        (ok pool-id)
+    )
+)
+
+;; Verify milestone (GPA) for a semester
+(define-public (verify-milestone
+        (pool-id uint)
+        (semester uint)
+        (student-gpa uint)
+    )
+    (let ((pool (unwrap! (map-get? scholarship-pools { pool-id: pool-id })
+            ERR-POOL-NOT-FOUND
+        )))
+        (asserts! (is-oracle tx-sender) ERR-ORACLE-NOT-AUTHORIZED)
+        (asserts! (get active pool) ERR-POOL-NOT-FOUND)
+        (asserts! (is-eq semester (+ (get semesters-released pool) u1))
+            ERR-MILESTONE-NOT-MET
+        )
+        (asserts! (<= semester (get total-semesters pool)) ERR-MILESTONE-NOT-MET)
+
+        (map-set milestone-verifications {
+            pool-id: pool-id,
+            semester: semester,
+        } {
+            gpa: student-gpa,
+            verified-by: tx-sender,
+            verified-at: stacks-block-height,
+            released: false,
+        })
+
+        (ok true)
+    )
+)
+
 ;; read only functions
 (define-read-only (is-oracle (oracle principal))
     (default-to false (map-get? oracles oracle))
@@ -89,6 +156,20 @@
 
 (define-read-only (get-pool-counter)
     (var-get pool-counter)
+)
+
+(define-read-only (get-pool-info (pool-id uint))
+    (map-get? scholarship-pools { pool-id: pool-id })
+)
+
+(define-read-only (get-milestone-verification
+        (pool-id uint)
+        (semester uint)
+    )
+    (map-get? milestone-verifications {
+        pool-id: pool-id,
+        semester: semester,
+    })
 )
 
 (define-read-only (get-contract-info)
